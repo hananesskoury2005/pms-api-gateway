@@ -7,9 +7,7 @@ const config = require('./config/services');
 const app = express();
 
 app.use(cors());
-app.use(express.json());
 
-// --- Health check global ---
 app.get('/', (req, res) => {
   res.json({
     service: 'API Gateway',
@@ -23,49 +21,43 @@ app.get('/', (req, res) => {
   });
 });
 
-// --- Health check de chaque service ---
 app.get('/api/health', async (req, res) => {
   const results = {};
-
   await Promise.all(
     Object.entries(config.services).map(async ([name, svc]) => {
       try {
-        const response = await fetch(`${svc.url}/`);
+        await fetch(`${svc.url}/`);
         results[name] = { status: 'up', url: svc.url };
       } catch {
         results[name] = { status: 'down', url: svc.url };
       }
     })
   );
-
   const allUp = Object.values(results).every(r => r.status === 'up');
   res.status(allUp ? 200 : 503).json({ status: allUp ? 'all_up' : 'partial', services: results });
 });
 
-// --- Proxy vers chaque service ---
 Object.entries(config.services).forEach(([name, svc]) => {
   app.use(
     svc.prefix,
     createProxyMiddleware({
       target: svc.url,
       changeOrigin: true,
-      pathRewrite: (path) => path.replace(new RegExp(`^${svc.prefix}`), ''),
+      pathRewrite: (path) => svc.rewrite(path),
       onError(err, req, res) {
-        console.error(`[Gateway] Erreur proxy ${name}: ${err.message}`);
-        res.status(502).json({
-          error: `Service ${name} indisponible`,
-          service: name,
-          target: svc.url,
-        });
+        console.error(`[Gateway] Erreur ${name}: ${err.message}`);
+        res.status(502).json({ error: `Service ${name} indisponible`, service: name });
       },
       onProxyReq(proxyReq, req) {
-        console.log(`[Gateway] ${req.method} ${req.originalUrl} -> ${svc.url}${req.url.replace(new RegExp(`^${svc.prefix}`), '')}`);
+        const rewritten = svc.rewrite(req.url);
+        console.log(`[Gateway] ${req.method} ${req.originalUrl} -> ${svc.url}${rewritten}`);
       },
     })
   );
 });
 
-// --- Route non trouvée ---
+app.use(express.json());
+
 app.use((req, res) => {
   res.status(404).json({
     error: 'Route non trouvée',
@@ -75,7 +67,6 @@ app.use((req, res) => {
 });
 
 const PORT = config.port;
-
 app.listen(PORT, () => {
   console.log(`API Gateway démarré sur le port ${PORT}`);
   Object.entries(config.services).forEach(([name, svc]) => {
