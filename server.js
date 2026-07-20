@@ -6,7 +6,27 @@ const config = require('./config/services');
 
 const app = express();
 
-app.use(cors());
+const allowedOrigins = (
+  process.env.CLIENT_ORIGINS || 'http://localhost:3000'
+)
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error('Origine non autorisée par CORS.'));
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+  })
+);
 
 app.get('/', (req, res) => {
   res.json({
